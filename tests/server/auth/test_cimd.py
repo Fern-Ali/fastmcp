@@ -388,3 +388,170 @@ class TestCreateCIMDDocument:
         # Should not raise
         json_str = json.dumps(doc)
         assert "redirect_uris" in json_str
+
+
+class TestCIMDOAuthIntegration:
+    """Integration tests for CIMD with OAuth flow."""
+
+    @pytest.mark.asyncio
+    async def test_cimd_client_registration_via_get_client(self, httpx_mock):
+        """Test that CIMD URL clients are loaded dynamically via get_client."""
+        from fastmcp.server.auth.oauth_proxy import OAuthProxy, ProxyDCRClient
+        from fastmcp.server.auth.providers.debug import DebugTokenVerifier
+        
+        # Mock CIMD document fetch
+        cimd_url = "https://client.example.com/cimd.json"
+        cimd_doc = {
+            "redirect_uris": ["https://client.example.com/callback"],
+            "client_name": "Test CIMD Client",
+            "client_uri": "https://client.example.com",
+        }
+        httpx_mock.add_response(url=cimd_url, json=cimd_doc)
+        
+        # Create OAuth proxy
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://upstream.example.com/authorize",
+            upstream_token_endpoint="https://upstream.example.com/token",
+            upstream_client_id="upstream-client-id",
+            upstream_client_secret="upstream-secret",
+            token_verifier=DebugTokenVerifier(),
+            base_url="https://server.example.com",
+        )
+        
+        # Get client using CIMD URL
+        client = await proxy.get_client(cimd_url)
+        
+        assert client is not None
+        assert isinstance(client, ProxyDCRClient)
+        assert client.client_id == cimd_url
+        assert client.client_name == "Test CIMD Client"
+        assert len(client.redirect_uris) == 1
+
+    @pytest.mark.asyncio
+    async def test_cimd_trust_policy_auto_approval(self, httpx_mock):
+        """Test that trusted CIMD clients can be auto-approved."""
+        from fastmcp.server.auth.cimd import CIMDTrustPolicy
+        from fastmcp.server.auth.oauth_proxy import OAuthProxy
+        from fastmcp.server.auth.providers.debug import DebugTokenVerifier
+        
+        # Create trust policy
+        trust_policy = CIMDTrustPolicy(
+            trusted_domains=["claude.ai"],
+            auto_approve_trusted=True,
+        )
+        
+        # Create OAuth proxy with trust policy
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://upstream.example.com/authorize",
+            upstream_token_endpoint="https://upstream.example.com/token",
+            upstream_client_id="upstream-client-id",
+            upstream_client_secret="upstream-secret",
+            token_verifier=DebugTokenVerifier(),
+            base_url="https://server.example.com",
+            cimd_trust_policy=trust_policy,
+        )
+        
+        # Verify trust policy is set
+        assert proxy._cimd_trust_policy.auto_approve_trusted is True
+        assert proxy._cimd_fetcher.is_trusted("https://claude.ai/cimd.json")
+        assert not proxy._cimd_fetcher.is_trusted("https://malicious.com/cimd.json")
+
+    @pytest.mark.asyncio
+    async def test_cimd_vs_dcr_client_loading(self, httpx_mock):
+        """Test that CIMD and traditional DCR clients work side by side."""
+        from mcp.shared.auth import OAuthClientInformationFull
+        from pydantic import AnyUrl
+        
+        from fastmcp.server.auth.oauth_proxy import OAuthProxy
+        from fastmcp.server.auth.providers.debug import DebugTokenVerifier
+        
+        # Mock CIMD document
+        cimd_url = "https://client.example.com/cimd.json"
+        cimd_doc = {
+            "redirect_uris": ["https://client.example.com/callback"],
+            "client_name": "CIMD Client",
+        }
+        httpx_mock.add_response(url=cimd_url, json=cimd_doc)
+        
+        # Create OAuth proxy
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://upstream.example.com/authorize",
+            upstream_token_endpoint="https://upstream.example.com/token",
+            upstream_client_id="upstream-client-id",
+            upstream_client_secret="upstream-secret",
+            token_verifier=DebugTokenVerifier(),
+            base_url="https://server.example.com",
+        )
+        
+        # Register a traditional DCR client
+        dcr_client_id = "dcr-client-123"
+        dcr_client_info = OAuthClientInformationFull(
+            client_id=dcr_client_id,
+            redirect_uris=[AnyUrl("https://dcr.example.com/callback")],
+        )
+        await proxy.register_client(dcr_client_info)
+        
+        # Load both clients
+        cimd_client = await proxy.get_client(cimd_url)
+        dcr_client = await proxy.get_client(dcr_client_id)
+        
+        # Both should work
+        assert cimd_client is not None
+        assert cimd_client.client_name == "CIMD Client"
+        
+        assert dcr_client is not None
+        assert dcr_client.client_id == dcr_client_id
+
+    @pytest.mark.asyncio
+    async def test_cimd_with_invalid_url_fails_gracefully(self):
+        """Test that invalid CIMD URLs are handled gracefully."""
+        from fastmcp.server.auth.oauth_proxy import OAuthProxy
+        from fastmcp.server.auth.providers.debug import DebugTokenVerifier
+        
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://upstream.example.com/authorize",
+            upstream_token_endpoint="https://upstream.example.com/token",
+            upstream_client_id="upstream-client-id",
+            upstream_client_secret="upstream-secret",
+            token_verifier=DebugTokenVerifier(),
+            base_url="https://server.example.com",
+        )
+        
+        # Try to get client with localhost URL (blocked by SSRF protection)
+        client = await proxy.get_client("https://localhost/cimd.json")
+        
+        # Should return None (unregistered client)
+        assert client is None
+
+    @pytest.mark.asyncio
+    async def test_cimd_fetcher_caching_integration(self, httpx_mock):
+        """Test that CIMD documents are cached across multiple get_client calls."""
+        from fastmcp.server.auth.oauth_proxy import OAuthProxy
+        from fastmcp.server.auth.providers.debug import DebugTokenVerifier
+        
+        cimd_url = "https://client.example.com/cimd.json"
+        cimd_doc = {
+            "redirect_uris": ["https://client.example.com/callback"],
+            "client_name": "Cached Client",
+        }
+        httpx_mock.add_response(url=cimd_url, json=cimd_doc)
+        
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://upstream.example.com/authorize",
+            upstream_token_endpoint="https://upstream.example.com/token",
+            upstream_client_id="upstream-client-id",
+            upstream_client_secret="upstream-secret",
+            token_verifier=DebugTokenVerifier(),
+            base_url="https://server.example.com",
+        )
+        
+        # First call fetches from network
+        client1 = await proxy.get_client(cimd_url)
+        assert len(httpx_mock.get_requests()) == 1
+        
+        # Second call uses cache
+        client2 = await proxy.get_client(cimd_url)
+        assert len(httpx_mock.get_requests()) == 1  # No additional request
+        
+        # Both should return the same data
+        assert client1.client_name == client2.client_name
