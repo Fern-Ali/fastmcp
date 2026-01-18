@@ -107,5 +107,7 @@ class CIMDRoute:
     async def _handle_request(self, request: Request) -> Response:
         """Handle CIMD document request."""
         # Return the metadata as JSON, filtering out None values
-        filtered_metadata = {k: v for k, v in self.client_metadata.items() if v is not None}
+        filtered_metadata = {
+            k: v for k, v in self.client_metadata.items() if v is not None
+        }
         return JSONResponse(filtered_metadata)

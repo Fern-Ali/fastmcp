@@ -3,7 +3,6 @@
 import json
 
 import httpx
-import pytest
 from starlette.requests import Request
 from starlette.routing import Route
 
@@ -27,7 +26,8 @@ class TestCIMDRoute:
         assert cimd.path == "/.well-known/mcp-client.json"
         assert isinstance(cimd.route, Route)
         assert cimd.route.path == "/.well-known/mcp-client.json"
-        assert "GET" in cimd.route.methods
+        # Type ignore needed because methods can be None in some route configurations
+        assert cimd.route.methods and "GET" in cimd.route.methods  # type: ignore
 
     def test_cimd_metadata_fields(self):
         """Test that client metadata is correctly stored."""
@@ -92,7 +92,6 @@ class TestCIMDRoute:
         )
 
         # Create a mock request
-        from starlette.datastructures import Headers
 
         scope = {
             "type": "http",
@@ -111,7 +110,9 @@ class TestCIMDRoute:
         assert response.headers["content-type"] == "application/json"
 
         # Parse JSON body
-        body = response.body.decode("utf-8")
+        body_bytes = response.body
+        assert isinstance(body_bytes, bytes)
+        body = body_bytes.decode("utf-8")
         data = json.loads(body)
 
         # Verify structure
@@ -144,11 +145,9 @@ class TestCIMDRoute:
                 # base_url is something like "http://127.0.0.1:56537/mcp"
                 parts = base_url.split("/")
                 root_url = f"{parts[0]}//{parts[2]}"
-                
+
                 # Request CIMD document at root level
-                response = await client.get(
-                    f"{root_url}/.well-known/mcp-client.json"
-                )
+                response = await client.get(f"{root_url}/.well-known/mcp-client.json")
 
                 assert response.status_code == 200
                 data = response.json()
@@ -167,7 +166,6 @@ class TestCIMDRoute:
         )
 
         # Create a mock request
-        from starlette.datastructures import Headers
 
         scope = {
             "type": "http",
@@ -179,7 +177,9 @@ class TestCIMDRoute:
         request = Request(scope)
 
         response = await cimd._handle_request(request)
-        body = response.body.decode("utf-8")
+        body_bytes = response.body
+        assert isinstance(body_bytes, bytes)
+        body = body_bytes.decode("utf-8")
         data = json.loads(body)
 
         # client_uri and scope should not be in the response
@@ -223,9 +223,7 @@ class TestCIMDRoute:
                 # Extract root URL
                 parts = base_url.split("/")
                 root_url = f"{parts[0]}//{parts[2]}"
-                
-                response = await client.get(
-                    f"{root_url}/.well-known/mcp-client.json"
-                )
+
+                response = await client.get(f"{root_url}/.well-known/mcp-client.json")
                 data = response.json()
                 assert data["client_name"] == "Client 1"
