@@ -1,0 +1,1 @@
+{"redirect_uris": ["https://app.example.com/callback"], "client_name": "Test App", "client_uri": "https://app.example.com", "contacts": ["admin@example.com"], "scope": "read write"}
