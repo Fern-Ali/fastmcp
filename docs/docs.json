@@ -127,7 +127,6 @@
                   "servers/lifespan",
                   "servers/logging",
                   "servers/middleware",
-                  "servers/pagination",
                   "servers/progress",
                   "servers/sampling",
                   "servers/storage-backends",

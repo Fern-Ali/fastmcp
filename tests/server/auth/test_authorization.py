@@ -2,7 +2,6 @@
 
 from unittest.mock import Mock
 
-import mcp.types as mcp_types
 import pytest
 from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
@@ -351,8 +350,8 @@ class TestAuthMiddleware:
             return "public"
 
         # No token - all tools filtered by middleware
-        result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
-        assert len(result.tools) == 0
+        tools = await mcp._list_tools_mcp()
+        assert len(tools) == 0
 
     async def test_middleware_allows_tools_with_token(self):
         mcp = FastMCP(middleware=[AuthMiddleware(auth=require_auth)])
@@ -364,8 +363,8 @@ class TestAuthMiddleware:
         token = make_token()
         tok = set_token(token)
         try:
-            result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
-            assert len(result.tools) == 1
+            tools = await mcp._list_tools_mcp()
+            assert len(tools) == 1
         finally:
             auth_context_var.reset(tok)
 
@@ -380,8 +379,8 @@ class TestAuthMiddleware:
         token = make_token(scopes=["read"])
         tok = set_token(token)
         try:
-            result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
-            assert len(result.tools) == 0
+            tools = await mcp._list_tools_mcp()
+            assert len(tools) == 0
         finally:
             auth_context_var.reset(tok)
 
@@ -389,8 +388,8 @@ class TestAuthMiddleware:
         token = make_token(scopes=["api"])
         tok = set_token(token)
         try:
-            result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
-            assert len(result.tools) == 1
+            tools = await mcp._list_tools_mcp()
+            assert len(tools) == 1
         finally:
             auth_context_var.reset(tok)
 
@@ -408,16 +407,16 @@ class TestAuthMiddleware:
             return "admin"
 
         # No token - public tool allowed, admin tool blocked
-        result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
-        assert len(result.tools) == 1
-        assert result.tools[0].name == "public_tool"
+        tools = await mcp._list_tools_mcp()
+        assert len(tools) == 1
+        assert tools[0].name == "public_tool"
 
         # Token with admin scope - both allowed
         token = make_token(scopes=["admin"])
         tok = set_token(token)
         try:
-            result = await mcp._list_tools_mcp(mcp_types.ListToolsRequest())
-            assert len(result.tools) == 2
+            tools = await mcp._list_tools_mcp()
+            assert len(tools) == 2
         finally:
             auth_context_var.reset(tok)
 
