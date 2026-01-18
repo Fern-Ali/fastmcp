@@ -127,7 +127,6 @@
                   "servers/lifespan",
                   "servers/logging",
                   "servers/middleware",
-                  "servers/pagination",
                   "servers/progress",
                   "servers/sampling",
                   "servers/storage-backends",
@@ -146,6 +145,7 @@
                   "servers/auth/remote-oauth",
                   "servers/auth/oauth-proxy",
                   "servers/auth/oidc-proxy",
+                  "servers/auth/cimd",
                   "servers/auth/full-oauth-server"
                 ]
               },
