@@ -1,0 +1,17 @@
+{
+  "redirect_uris": [
+    "https://myapp.example.com/callback",
+    "http://localhost:*/callback"
+  ],
+  "client_name": "My Example Application",
+  "client_uri": "https://myapp.example.com",
+  "logo_uri": "https://myapp.example.com/logo.png",
+  "scope": "read write delete",
+  "grant_types": [
+    "authorization_code"
+  ],
+  "contacts": [
+    "admin@myapp.example.com",
+    "support@myapp.example.com"
+  ]
+}

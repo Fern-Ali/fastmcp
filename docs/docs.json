@@ -145,6 +145,7 @@
                   "servers/auth/remote-oauth",
                   "servers/auth/oauth-proxy",
                   "servers/auth/oidc-proxy",
+                  "servers/auth/cimd",
                   "servers/auth/full-oauth-server"
                 ]
               },

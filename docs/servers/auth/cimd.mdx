@@ -1,0 +1,288 @@
+---
+title: CIMD (Client ID Metadata Documents)
+sidebarTitle: CIMD
+description: Simplify OAuth client registration with URL-based client identifiers.
+icon: globe
+tag: NEW
+---
+
+import { VersionBadge } from "/snippets/version-badge.mdx";
+
+<VersionBadge version="2.12.0" />
+
+CIMD (Client ID Metadata Documents) is a simpler alternative to Dynamic Client Registration (DCR) where clients use HTTPS URLs as their `client_id`. The URL points to a JSON document describing the client's metadata, eliminating manual registration, secret management, and registration endpoint implementations.
+
+Instead of registering with each server, clients simply host a static JSON file at an HTTPS URL and use that URL as their `client_id`. The server fetches and validates the document to verify domain ownership.
+
+## Why CIMD?
+
+**For server operators:**
+- No manual client registration required
+- Verified domain badges on consent screens
+- Configure trust policies for known clients
+- Auto-approve trusted domains
+- Reduce support burden
+
+**For client developers:**
+- Skip DCR entirely
+- No secrets to manage or rotate
+- Simple JSON file hosting
+- Domain ownership verification
+- Easier multi-server support
+
+## How It Works
+
+Your `client_id` is just a URL pointing to a JSON file you host. When you connect to a server, you say "I'm `https://myapp.com/cimd.json`" and the server fetches that document to verify you really own that domain.
+
+```python
+# Instead of registering each client manually:
+# client_id = "random-client-id"
+# client_secret = "super-secret"
+
+# Just use your hosted document URL:
+client_id = "https://myapp.com/cimd.json"
+# No secret needed!
+```
+
+## Creating CIMD Documents
+
+### Using the CLI
+
+The fastest way to create a CIMD document is with the CLI:
+
+```bash
+fastmcp cimd create \
+  --name "My Application" \
+  --redirect-uri "https://app.example.com/callback" \
+  --redirect-uri "http://localhost:*/callback" \
+  --client-uri "https://app.example.com" \
+  --contact "admin@example.com" \
+  -o cimd.json
+```
+
+This creates a valid CIMD document:
+
+```json
+{
+  "redirect_uris": [
+    "https://app.example.com/callback",
+    "http://localhost:*/callback"
+  ],
+  "client_name": "My Application",
+  "client_uri": "https://app.example.com",
+  "contacts": ["admin@example.com"],
+  "grant_types": ["authorization_code"]
+}
+```
+
+### Using Python
+
+You can also create CIMD documents programmatically:
+
+```python
+from fastmcp.server.auth import create_cimd_document
+import json
+
+doc = create_cimd_document(
+    redirect_uris=["https://app.example.com/callback"],
+    client_name="My Application",
+    client_uri="https://app.example.com",
+    scope="read write",
+    contacts=["admin@example.com"],
+)
+
+# Save to file
+with open("cimd.json", "w") as f:
+    json.dump(doc, f, indent=2)
+```
+
+### Hosting the Document
+
+Once created, host your CIMD document at an HTTPS URL:
+
+1. Place the file on your web server
+2. Ensure it's accessible via HTTPS (HTTP not allowed)
+3. Use that full URL as your `client_id`
+
+```bash
+# Host at your domain
+https://myapp.com/cimd.json
+https://myapp.com/.well-known/cimd.json
+https://api.myapp.com/oauth/cimd.json
+```
+
+## Server Configuration
+
+### Basic Setup
+
+Enable CIMD support in your OAuth proxy by simply including it—no additional configuration required for basic usage:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.auth import OAuthProxy
+from fastmcp.server.auth.providers.jwt import JWTVerifier
+
+token_verifier = JWTVerifier(
+    jwks_uri="https://your-provider.com/.well-known/jwks.json",
+    issuer="https://your-provider.com",
+    audience="your-app-id"
+)
+
+auth = OAuthProxy(
+    upstream_authorization_endpoint="https://provider.com/oauth/authorize",
+    upstream_token_endpoint="https://provider.com/oauth/token",
+    upstream_client_id="your-client-id",
+    upstream_client_secret="your-client-secret",
+    token_verifier=token_verifier,
+    base_url="https://your-server.com",
+)
+
+mcp = FastMCP(name="My Server", auth=auth)
+```
+
+The proxy automatically:
+- Detects URL-formatted `client_id` values
+- Fetches and validates CIMD documents
+- Shows verified domain badges on consent screens
+- Accepts both CIMD and traditional DCR clients
+
+### Trust Policies
+
+Configure automatic approval for trusted clients:
+
+```python
+from fastmcp.server.auth import OAuthProxy, CIMDTrustPolicy
+
+auth = OAuthProxy(
+    upstream_authorization_endpoint="https://provider.com/oauth/authorize",
+    upstream_token_endpoint="https://provider.com/oauth/token",
+    upstream_client_id="your-client-id",
+    upstream_client_secret="your-client-secret",
+    token_verifier=token_verifier,
+    base_url="https://your-server.com",
+    cimd_trust_policy=CIMDTrustPolicy(
+        # Automatically approve these domains
+        trusted_domains=["claude.ai", "cursor.com", "*.mycompany.com"],
+        auto_approve_trusted=True,
+        # Block these domains even if they match a pattern
+        blocked_domains=["malicious.com"],
+    ),
+)
+```
+
+<ParamField body="trusted_domains" type="list[str]">
+  List of trusted domain patterns. Supports wildcards like `*.example.com`. Case-insensitive matching.
+</ParamField>
+
+<ParamField body="auto_approve_trusted" type="bool" default="False">
+  When `True`, automatically approve authorization requests from trusted domains without showing consent screen.
+</ParamField>
+
+<ParamField body="blocked_domains" type="list[str]">
+  List of blocked domains. Takes precedence over trusted domains.
+</ParamField>
+
+## Security Features
+
+CIMD includes built-in security protections:
+
+### SSRF Protection
+
+The CIMD fetcher blocks requests to:
+- Private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+- Loopback addresses (127.0.0.1, ::1, localhost)
+- Private DNS patterns (*.local, *.internal, *.lan)
+- Link-local addresses
+
+### Caching
+
+Documents are cached efficiently:
+- Respects HTTP cache headers
+- Maximum 24-hour cache per spec
+- In-memory storage with automatic expiry
+
+### Validation
+
+All documents are validated for:
+- HTTPS-only URLs (no HTTP allowed)
+- Valid JSON structure
+- Required fields (`redirect_uris`)
+- Email format for contacts
+- URI format for all URL fields
+
+## CLI Reference
+
+### Create Command
+
+```bash
+fastmcp cimd create [OPTIONS]
+```
+
+<ParamField body="--name" type="str">
+  Human-readable name of the client application
+</ParamField>
+
+<ParamField body="--redirect-uri" type="str" required>
+  Authorized redirect URI. Can be used multiple times. Supports wildcards like `http://localhost:*/callback`
+</ParamField>
+
+<ParamField body="--client-uri" type="str">
+  URL of the client application's homepage
+</ParamField>
+
+<ParamField body="--logo-uri" type="str">
+  URL to the client application's logo image
+</ParamField>
+
+<ParamField body="--scope" type="str">
+  Space-separated list of OAuth scopes the client will use
+</ParamField>
+
+<ParamField body="--contact" type="str">
+  Contact email address. Can be used multiple times
+</ParamField>
+
+<ParamField body="--output, -o" type="str">
+  Output file path. If not specified, prints to stdout
+</ParamField>
+
+### Validate Command
+
+```bash
+fastmcp cimd validate [FILE] [OPTIONS]
+```
+
+<ParamField body="FILE" type="str" required>
+  Path to CIMD document to validate
+</ParamField>
+
+<ParamField body="--verbose, -v" type="bool" default="False">
+  Show full document details
+</ParamField>
+
+<ParamField body="--output, -o" type="str">
+  Output file path for validation results
+</ParamField>
+
+## Examples
+
+See the [CIMD examples directory](/examples/auth/cimd) for complete working examples including:
+
+- Basic CIMD document creation
+- Server setup with trust policies
+- Client integration
+- Domain verification
+
+## Specification Compliance
+
+FastMCP's CIMD implementation follows:
+- [IETF draft-ietf-oauth-client-id-metadata-document](https://datatracker.ietf.org/doc/draft-ietf-oauth-client-id-metadata-document/)
+- [MCP SEP-991: URL-based Client Registration](https://github.com/modelcontextprotocol/modelcontextprotocol/issues/991)
+- OAuth 2.1 security best practices
+- 24-hour maximum cache per specification
+
+## See Also
+
+- [OAuth Proxy](/servers/auth/oauth-proxy) - Traditional OAuth provider integration
+- [Remote OAuth](/servers/auth/remote-oauth) - For DCR-capable providers
+- [Token Verification](/servers/auth/token-verification) - Validating access tokens

@@ -63,6 +63,7 @@ def create(
     output: Annotated[
         str | None,
         cyclopts.Parameter(
+            name=["--output", "-o"],
             help="Output file path. If not specified, prints to stdout",
         ),
     ] = None,
@@ -151,6 +152,7 @@ def validate(
     verbose: Annotated[
         bool,
         cyclopts.Parameter(
+            name=["--verbose", "-v"],
             help="Show detailed validation information",
         ),
     ] = False,
