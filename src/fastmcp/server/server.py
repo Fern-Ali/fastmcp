@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import secrets
+import signal
+import threading
 import warnings
 import weakref
 from collections.abc import (
@@ -748,15 +751,65 @@ class FastMCP(Provider, Generic[LifespanResultT]):
             show_banner: Whether to display the server banner. If None, uses the
                 FASTMCP_SHOW_SERVER_BANNER setting (default: True).
         """
+        # Resolve transport (default to stdio if not specified)
+        resolved_transport = transport if transport is not None else "stdio"
 
-        anyio.run(
-            partial(
-                self.run_async,
-                transport,
-                show_banner=show_banner,
-                **transport_kwargs,
-            )
+        # Only install custom signal handlers for stdio transport in main thread
+        # HTTP/SSE use uvicorn which has proper async signal handling
+        should_handle_signals = (
+            resolved_transport == "stdio"
+            and threading.current_thread() is threading.main_thread()
         )
+
+        if should_handle_signals:
+            # Track if we're already shutting down to prevent cascading interrupts
+            shutting_down = False
+
+            def handle_interrupt(signum: int, frame: Any) -> None:
+                """Handle SIGINT/SIGTERM during shutdown - ignore additional signals."""
+                nonlocal shutting_down
+                if not shutting_down:
+                    shutting_down = True
+                    # Raise KeyboardInterrupt for first signal
+                    raise KeyboardInterrupt()
+                # Ignore subsequent signals during cleanup
+                logger.debug("Ignoring additional interrupt signal during shutdown")
+
+            # Install custom signal handlers to prevent cascading interrupts
+            old_sigint = signal.signal(signal.SIGINT, handle_interrupt)
+            old_sigterm = signal.signal(signal.SIGTERM, handle_interrupt)
+
+        try:
+            anyio.run(
+                partial(
+                    self.run_async,
+                    resolved_transport,
+                    show_banner=show_banner,
+                    **transport_kwargs,
+                )
+            )
+        except KeyboardInterrupt:
+            if should_handle_signals:
+                # Restore signal handlers before exiting
+                signal.signal(signal.SIGINT, old_sigint)
+                signal.signal(signal.SIGTERM, old_sigterm)
+
+                # Suppress the traceback for clean exit on Ctrl-C
+                logger.info("Server stopped")
+
+                # Use os._exit to immediately terminate without cleanup.
+                # This is necessary because stdio streams may be blocking indefinitely
+                # on stdin.read(). Normal cleanup (sys.exit/raise SystemExit) would
+                # wait for these blocking operations to complete.
+                os._exit(0)
+            else:
+                # For HTTP/SSE or non-main thread, propagate normally
+                raise
+        finally:
+            if should_handle_signals:
+                # Restore original signal handlers (only reached if no exception)
+                signal.signal(signal.SIGINT, old_sigint)
+                signal.signal(signal.SIGTERM, old_sigterm)
 
     def _setup_handlers(self) -> None:
         """Set up core MCP protocol handlers.
@@ -2636,6 +2689,10 @@ class FastMCP(Provider, Generic[LifespanResultT]):
                             ),
                             stateless=stateless,
                         )
+        except KeyboardInterrupt:
+            # Log clean message and suppress traceback at higher level
+            logger.info("Received shutdown signal, stopping server...")
+            raise
         finally:
             reset_transport(token)
 

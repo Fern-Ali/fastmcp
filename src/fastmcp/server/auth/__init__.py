@@ -13,6 +13,12 @@ from .authorization import (
     restrict_tag,
     run_auth_checks,
 )
+from .cimd import (
+    CIMDDocument,
+    CIMDFetcher,
+    CIMDTrustPolicy,
+    create_cimd_document,
+)
 from .providers.debug import DebugTokenVerifier
 from .providers.jwt import JWTVerifier, StaticTokenVerifier
 from .oauth_proxy import OAuthProxy
@@ -24,6 +30,9 @@ __all__ = [
     "AuthCheck",
     "AuthContext",
     "AuthProvider",
+    "CIMDDocument",
+    "CIMDFetcher",
+    "CIMDTrustPolicy",
     "DebugTokenVerifier",
     "JWTVerifier",
     "OAuthProvider",
@@ -32,6 +41,7 @@ __all__ = [
     "RemoteAuthProvider",
     "StaticTokenVerifier",
     "TokenVerifier",
+    "create_cimd_document",
     "require_auth",
     "require_scopes",
     "restrict_tag",
