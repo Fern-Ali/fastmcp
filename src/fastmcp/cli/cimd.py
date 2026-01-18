@@ -31,11 +31,11 @@ def create(
         ),
     ] = None,
     redirect_uri: Annotated[
-        list[str],
+        list[str] | None,
         cyclopts.Parameter(
             help="Authorized redirect URI (can be used multiple times)",
         ),
-    ] = [],
+    ] = None,
     client_uri: Annotated[
         str | None,
         cyclopts.Parameter(
@@ -87,7 +87,7 @@ def create(
         # and use that URL as your client_id when connecting to MCP servers
     """
     # Validate that at least one redirect URI is provided
-    if not redirect_uri:
+    if not redirect_uri or len(redirect_uri) == 0:
         console.print(
             "[bold red]Error:[/bold red] At least one --redirect-uri is required"
         )
