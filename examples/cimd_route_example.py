@@ -5,7 +5,8 @@ This example shows how to use CIMDRoute to self-host a Client Identity
 Metadata Document (CIMD) when your FastMCP server needs to act as a client
 to upstream MCP servers that require CIMD authentication.
 
-Run with: fastmcp run cimd_route_example.py
+Run with: python cimd_route_example.py
+Or: fastmcp run cimd_route_example.py
 """
 
 from fastmcp import FastMCP
