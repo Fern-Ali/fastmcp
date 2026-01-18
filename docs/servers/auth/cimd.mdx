@@ -54,7 +54,7 @@ The fastest way to create a CIMD document is with the CLI:
 fastmcp cimd create \
   --name "My Application" \
   --redirect-uri "https://app.example.com/callback" \
-  --redirect-uri "http://localhost:*/callback" \
+  --redirect-uri "http://localhost:8080/callback" \
   --client-uri "https://app.example.com" \
   --contact "admin@example.com" \
   -o cimd.json
@@ -223,7 +223,7 @@ fastmcp cimd create [OPTIONS]
 </ParamField>
 
 <ParamField body="--redirect-uri" type="str" required>
-  Authorized redirect URI. Can be used multiple times. Supports wildcards like `http://localhost:*/callback`
+  Authorized redirect URI. Can be used multiple times
 </ParamField>
 
 <ParamField body="--client-uri" type="str">

@@ -24,7 +24,7 @@ Use the FastMCP CLI to create a CIMD document:
 fastmcp cimd create \
   --name "My Application" \
   --redirect-uri "http://localhost:8080/callback" \
-  --redirect-uri "http://localhost:*/callback" \
+  --redirect-uri "http://localhost:3000/callback" \
   --client-uri "https://myapp.com" \
   --contact "admin@myapp.com" \
   -o cimd.json

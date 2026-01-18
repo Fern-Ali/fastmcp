@@ -33,7 +33,7 @@ def create(
     redirect_uri: Annotated[
         list[str],
         cyclopts.Parameter(
-            help="Authorized redirect URI (can be used multiple times). Supports wildcards like http://localhost:*/callback",
+            help="Authorized redirect URI (can be used multiple times)",
         ),
     ] = [],
     client_uri: Annotated[
@@ -79,7 +79,7 @@ def create(
         fastmcp cimd create \\
             --name "My Application" \\
             --redirect-uri "https://app.example.com/callback" \\
-            --redirect-uri "http://localhost:*/callback" \\
+            --redirect-uri "http://localhost:8080/callback" \\
             --client-uri "https://app.example.com" \\
             --output cimd.json
 

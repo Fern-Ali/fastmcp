@@ -17,7 +17,7 @@ print("=" * 60)
 cimd_doc = create_cimd_document(
     redirect_uris=[
         "https://myapp.example.com/callback",
-        "http://localhost:*/callback",  # Wildcard for local development
+        "http://localhost:8080/callback",  # Specific port for local development
     ],
     client_name="My Example Application",
     client_uri="https://myapp.example.com",
