@@ -4,7 +4,7 @@ import time
 
 import httpx
 import pytest
-from pydantic import ValidationError
+from pydantic import AnyHttpUrl, ValidationError
 
 from fastmcp.server.auth.cimd import (
     CIMD_CACHE_MAX_AGE_SECONDS,
@@ -52,16 +52,17 @@ class TestCIMDDocument:
         """Test that invalid email addresses in contacts are rejected."""
         with pytest.raises(ValidationError, match="Invalid email address"):
             CIMDDocument(
-                redirect_uris=["https://example.com/callback"],
+                redirect_uris=[AnyHttpUrl("https://example.com/callback")],
                 contacts=["not-an-email"],
             )
 
     def test_valid_multiple_contacts(self):
         """Test that multiple valid email contacts are accepted."""
         doc = CIMDDocument(
-            redirect_uris=["https://example.com/callback"],
+            redirect_uris=[AnyHttpUrl("https://example.com/callback")],
             contacts=["admin@example.com", "support@example.com"],
         )
+        assert doc.contacts is not None
         assert len(doc.contacts) == 2
 
 
@@ -154,17 +155,17 @@ class TestCIMDFetcher:
     def test_validate_url_blocks_private_ips(self):
         """Test SSRF protection for private IP addresses."""
         fetcher = CIMDFetcher()
-        
+
         # IPv4 private ranges
         with pytest.raises(ValueError, match="private IP address"):
             fetcher._validate_url("https://192.168.1.1/cimd.json")
-        
+
         with pytest.raises(ValueError, match="private IP address"):
             fetcher._validate_url("https://10.0.0.1/cimd.json")
-        
+
         with pytest.raises(ValueError, match="private IP address"):
             fetcher._validate_url("https://172.16.0.1/cimd.json")
-        
+
         with pytest.raises(ValueError, match="private IP address"):
             fetcher._validate_url("https://127.0.0.1/cimd.json")
 
@@ -185,7 +186,7 @@ class TestCIMDFetcher:
         """Test that blocked domains are rejected."""
         policy = CIMDTrustPolicy(blocked_domains=["malicious.com"])
         fetcher = CIMDFetcher(trust_policy=policy)
-        
+
         with pytest.raises(ValueError, match="Domain is blocked"):
             fetcher._validate_url("https://malicious.com/cimd.json")
 
@@ -197,12 +198,12 @@ class TestCIMDFetcher:
             "redirect_uris": ["https://example.com/callback"],
             "client_name": "Test Client",
         }
-        
+
         httpx_mock.add_response(url=cimd_url, json=doc_data)
-        
+
         fetcher = CIMDFetcher()
         doc = await fetcher.fetch(cimd_url)
-        
+
         assert doc.client_name == "Test Client"
         assert len(doc.redirect_uris) == 1
 
@@ -214,19 +215,19 @@ class TestCIMDFetcher:
             "redirect_uris": ["https://example.com/callback"],
             "client_name": "Test Client",
         }
-        
+
         httpx_mock.add_response(url=cimd_url, json=doc_data)
-        
+
         fetcher = CIMDFetcher()
-        
+
         # First fetch
         doc1 = await fetcher.fetch(cimd_url)
         assert len(httpx_mock.get_requests()) == 1
-        
+
         # Second fetch should use cache
         doc2 = await fetcher.fetch(cimd_url)
         assert len(httpx_mock.get_requests()) == 1  # No additional HTTP call
-        
+
         assert doc1.client_name == doc2.client_name
 
     @pytest.mark.asyncio
@@ -237,26 +238,24 @@ class TestCIMDFetcher:
             "redirect_uris": ["https://example.com/callback"],
             "client_name": "Test Client",
         }
-        
+
         # Return with short cache time
         httpx_mock.add_response(
-            url=cimd_url,
-            json=doc_data,
-            headers={"Cache-Control": "max-age=1"}
+            url=cimd_url, json=doc_data, headers={"Cache-Control": "max-age=1"}
         )
-        
+
         fetcher = CIMDFetcher()
-        
+
         # First fetch
         await fetcher.fetch(cimd_url)
         assert len(httpx_mock.get_requests()) == 1
-        
+
         # Wait for cache to expire
         time.sleep(1.1)
-        
+
         # Add second response for the re-fetch
         httpx_mock.add_response(url=cimd_url, json=doc_data)
-        
+
         # Should fetch again
         await fetcher.fetch(cimd_url)
         assert len(httpx_mock.get_requests()) == 2
@@ -268,17 +267,15 @@ class TestCIMDFetcher:
         doc_data = {
             "redirect_uris": ["https://example.com/callback"],
         }
-        
+
         # Try to set very long cache time
         httpx_mock.add_response(
-            url=cimd_url,
-            json=doc_data,
-            headers={"Cache-Control": "max-age=999999999"}
+            url=cimd_url, json=doc_data, headers={"Cache-Control": "max-age=999999999"}
         )
-        
+
         fetcher = CIMDFetcher()
         await fetcher.fetch(cimd_url)
-        
+
         # Check that cached entry doesn't exceed 24hr
         cached = fetcher._get_cached(cimd_url)
         assert cached is not None
@@ -289,10 +286,10 @@ class TestCIMDFetcher:
     async def test_fetch_invalid_document(self, httpx_mock):
         """Test that invalid documents are rejected."""
         cimd_url = "https://example.com/cimd.json"
-        
+
         # Missing required redirect_uris field
         httpx_mock.add_response(url=cimd_url, json={"client_name": "Test"})
-        
+
         fetcher = CIMDFetcher()
         with pytest.raises(ValidationError):
             await fetcher.fetch(cimd_url)
@@ -301,9 +298,9 @@ class TestCIMDFetcher:
     async def test_fetch_http_error(self, httpx_mock):
         """Test handling of HTTP errors."""
         cimd_url = "https://example.com/cimd.json"
-        
+
         httpx_mock.add_response(url=cimd_url, status_code=404)
-        
+
         fetcher = CIMDFetcher()
         with pytest.raises(httpx.HTTPStatusError):
             await fetcher.fetch(cimd_url)
@@ -313,9 +310,9 @@ class TestCIMDFetcher:
         fetcher = CIMDFetcher()
         fetcher._cache["https://example.com/cimd.json"] = None  # type: ignore
         fetcher._cache["https://other.com/cimd.json"] = None  # type: ignore
-        
+
         fetcher.clear_cache("https://example.com/cimd.json")
-        
+
         assert "https://example.com/cimd.json" not in fetcher._cache
         assert "https://other.com/cimd.json" in fetcher._cache
 
@@ -324,16 +321,16 @@ class TestCIMDFetcher:
         fetcher = CIMDFetcher()
         fetcher._cache["https://example.com/cimd.json"] = None  # type: ignore
         fetcher._cache["https://other.com/cimd.json"] = None  # type: ignore
-        
+
         fetcher.clear_cache()
-        
+
         assert len(fetcher._cache) == 0
 
     def test_is_trusted_with_policy(self):
         """Test trust checking with policy."""
         policy = CIMDTrustPolicy(trusted_domains=["claude.ai"])
         fetcher = CIMDFetcher(trust_policy=policy)
-        
+
         assert fetcher.is_trusted("https://claude.ai/cimd.json")
         assert not fetcher.is_trusted("https://example.com/cimd.json")
 
@@ -343,10 +340,8 @@ class TestCreateCIMDDocument:
 
     def test_minimal_document(self):
         """Test creating minimal document."""
-        doc = create_cimd_document(
-            redirect_uris=["https://example.com/callback"]
-        )
-        
+        doc = create_cimd_document(redirect_uris=["https://example.com/callback"])
+
         assert "redirect_uris" in doc
         assert doc["redirect_uris"] == ["https://example.com/callback"]
         assert "client_name" not in doc
@@ -365,7 +360,7 @@ class TestCreateCIMDDocument:
             tos_uri="https://example.com/tos",
             policy_uri="https://example.com/privacy",
         )
-        
+
         assert doc["client_name"] == "Test Client"
         assert doc["scope"] == "read write"
         assert doc["contacts"] == ["admin@example.com"]
@@ -379,12 +374,12 @@ class TestCreateCIMDDocument:
     def test_document_serializable(self):
         """Test that created document can be JSON serialized."""
         import json
-        
+
         doc = create_cimd_document(
             redirect_uris=["https://example.com/callback"],
             client_name="Test Client",
         )
-        
+
         # Should not raise
         json_str = json.dumps(doc)
         assert "redirect_uris" in json_str
@@ -398,7 +393,7 @@ class TestCIMDOAuthIntegration:
         """Test that CIMD URL clients are loaded dynamically via get_client."""
         from fastmcp.server.auth.oauth_proxy import OAuthProxy, ProxyDCRClient
         from fastmcp.server.auth.providers.debug import DebugTokenVerifier
-        
+
         # Mock CIMD document fetch
         cimd_url = "https://client.example.com/cimd.json"
         cimd_doc = {
@@ -407,7 +402,7 @@ class TestCIMDOAuthIntegration:
             "client_uri": "https://client.example.com",
         }
         httpx_mock.add_response(url=cimd_url, json=cimd_doc)
-        
+
         # Create OAuth proxy
         proxy = OAuthProxy(
             upstream_authorization_endpoint="https://upstream.example.com/authorize",
@@ -417,14 +412,15 @@ class TestCIMDOAuthIntegration:
             token_verifier=DebugTokenVerifier(),
             base_url="https://server.example.com",
         )
-        
+
         # Get client using CIMD URL
         client = await proxy.get_client(cimd_url)
-        
+
         assert client is not None
         assert isinstance(client, ProxyDCRClient)
         assert client.client_id == cimd_url
         assert client.client_name == "Test CIMD Client"
+        assert client.redirect_uris is not None
         assert len(client.redirect_uris) == 1
 
     @pytest.mark.asyncio
@@ -433,13 +429,13 @@ class TestCIMDOAuthIntegration:
         from fastmcp.server.auth.cimd import CIMDTrustPolicy
         from fastmcp.server.auth.oauth_proxy import OAuthProxy
         from fastmcp.server.auth.providers.debug import DebugTokenVerifier
-        
+
         # Create trust policy
         trust_policy = CIMDTrustPolicy(
             trusted_domains=["claude.ai"],
             auto_approve_trusted=True,
         )
-        
+
         # Create OAuth proxy with trust policy
         proxy = OAuthProxy(
             upstream_authorization_endpoint="https://upstream.example.com/authorize",
@@ -450,7 +446,7 @@ class TestCIMDOAuthIntegration:
             base_url="https://server.example.com",
             cimd_trust_policy=trust_policy,
         )
-        
+
         # Verify trust policy is set
         assert proxy._cimd_trust_policy.auto_approve_trusted is True
         assert proxy._cimd_fetcher.is_trusted("https://claude.ai/cimd.json")
@@ -461,10 +457,10 @@ class TestCIMDOAuthIntegration:
         """Test that CIMD and traditional DCR clients work side by side."""
         from mcp.shared.auth import OAuthClientInformationFull
         from pydantic import AnyUrl
-        
+
         from fastmcp.server.auth.oauth_proxy import OAuthProxy
         from fastmcp.server.auth.providers.debug import DebugTokenVerifier
-        
+
         # Mock CIMD document
         cimd_url = "https://client.example.com/cimd.json"
         cimd_doc = {
@@ -472,7 +468,7 @@ class TestCIMDOAuthIntegration:
             "client_name": "CIMD Client",
         }
         httpx_mock.add_response(url=cimd_url, json=cimd_doc)
-        
+
         # Create OAuth proxy
         proxy = OAuthProxy(
             upstream_authorization_endpoint="https://upstream.example.com/authorize",
@@ -482,7 +478,7 @@ class TestCIMDOAuthIntegration:
             token_verifier=DebugTokenVerifier(),
             base_url="https://server.example.com",
         )
-        
+
         # Register a traditional DCR client
         dcr_client_id = "dcr-client-123"
         dcr_client_info = OAuthClientInformationFull(
@@ -490,15 +486,15 @@ class TestCIMDOAuthIntegration:
             redirect_uris=[AnyUrl("https://dcr.example.com/callback")],
         )
         await proxy.register_client(dcr_client_info)
-        
+
         # Load both clients
         cimd_client = await proxy.get_client(cimd_url)
         dcr_client = await proxy.get_client(dcr_client_id)
-        
+
         # Both should work
         assert cimd_client is not None
         assert cimd_client.client_name == "CIMD Client"
-        
+
         assert dcr_client is not None
         assert dcr_client.client_id == dcr_client_id
 
@@ -507,7 +503,7 @@ class TestCIMDOAuthIntegration:
         """Test that invalid CIMD URLs are handled gracefully."""
         from fastmcp.server.auth.oauth_proxy import OAuthProxy
         from fastmcp.server.auth.providers.debug import DebugTokenVerifier
-        
+
         proxy = OAuthProxy(
             upstream_authorization_endpoint="https://upstream.example.com/authorize",
             upstream_token_endpoint="https://upstream.example.com/token",
@@ -516,10 +512,10 @@ class TestCIMDOAuthIntegration:
             token_verifier=DebugTokenVerifier(),
             base_url="https://server.example.com",
         )
-        
+
         # Try to get client with localhost URL (blocked by SSRF protection)
         client = await proxy.get_client("https://localhost/cimd.json")
-        
+
         # Should return None (unregistered client)
         assert client is None
 
@@ -528,14 +524,14 @@ class TestCIMDOAuthIntegration:
         """Test that CIMD documents are cached across multiple get_client calls."""
         from fastmcp.server.auth.oauth_proxy import OAuthProxy
         from fastmcp.server.auth.providers.debug import DebugTokenVerifier
-        
+
         cimd_url = "https://client.example.com/cimd.json"
         cimd_doc = {
             "redirect_uris": ["https://client.example.com/callback"],
             "client_name": "Cached Client",
         }
         httpx_mock.add_response(url=cimd_url, json=cimd_doc)
-        
+
         proxy = OAuthProxy(
             upstream_authorization_endpoint="https://upstream.example.com/authorize",
             upstream_token_endpoint="https://upstream.example.com/token",
@@ -544,14 +540,16 @@ class TestCIMDOAuthIntegration:
             token_verifier=DebugTokenVerifier(),
             base_url="https://server.example.com",
         )
-        
+
         # First call fetches from network
         client1 = await proxy.get_client(cimd_url)
         assert len(httpx_mock.get_requests()) == 1
-        
+
         # Second call uses cache
         client2 = await proxy.get_client(cimd_url)
         assert len(httpx_mock.get_requests()) == 1  # No additional request
-        
+
         # Both should return the same data
+        assert client1 is not None
+        assert client2 is not None
         assert client1.client_name == client2.client_name

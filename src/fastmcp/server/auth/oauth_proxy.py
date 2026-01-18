@@ -416,7 +416,7 @@ def create_consent_html(
             }
         </style>
     """
-    
+
     additional_styles = (
         INFO_BOX_STYLES
         + REDIRECT_SECTION_STYLES
@@ -1006,11 +1006,11 @@ class OAuthProxy(OAuthProvider):
     @override
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         """Get client information by ID.
-        
+
         This method supports two types of clients:
         1. Traditional DCR clients with random IDs stored in our database
         2. CIMD clients where client_id is an HTTPS URL pointing to metadata
-        
+
         For CIMD clients, we fetch and cache the document, then create a virtual
         client with the metadata. This allows clients to skip DCR entirely.
 
@@ -1021,19 +1021,20 @@ class OAuthProxy(OAuthProvider):
             try:
                 # Fetch CIMD document
                 cimd_doc = await self._cimd_fetcher.fetch(client_id)
-                
+
                 # Create a virtual ProxyDCRClient from CIMD metadata
                 proxy_client = ProxyDCRClient(
                     client_id=client_id,
                     client_secret=None,
                     redirect_uris=[AnyUrl(str(uri)) for uri in cimd_doc.redirect_uris],
-                    grant_types=cimd_doc.grant_types or ["authorization_code", "refresh_token"],
+                    grant_types=cimd_doc.grant_types
+                    or ["authorization_code", "refresh_token"],
                     scope=cimd_doc.scope or self._default_scope_str,
                     token_endpoint_auth_method="none",
                     allowed_redirect_uri_patterns=self._allowed_client_redirect_uris,
                     client_name=cimd_doc.client_name,
                 )
-                
+
                 logger.info(
                     "Loaded CIMD client from %s (name: %s, %d redirect URIs)",
                     client_id,
@@ -1041,7 +1042,7 @@ class OAuthProxy(OAuthProvider):
                     len(cimd_doc.redirect_uris),
                 )
                 return proxy_client
-                
+
             except Exception as e:
                 logger.error(
                     "Failed to fetch CIMD document from %s: %s",
@@ -1050,7 +1051,7 @@ class OAuthProxy(OAuthProvider):
                 )
                 # Return None to trigger unregistered client error
                 return None
-        
+
         # Load traditional DCR client from storage
         if not (client := await self._client_store.get(key=client_id)):
             return None
@@ -2219,10 +2220,7 @@ class OAuthProxy(OAuthProvider):
         is_cimd = self._cimd_fetcher.is_cimd_client_id(txn["client_id"])
         if is_cimd and self._cimd_trust_policy.auto_approve_trusted:
             if self._cimd_fetcher.is_trusted(txn["client_id"]):
-                logger.info(
-                    "Auto-approving trusted CIMD client: %s",
-                    txn["client_id"]
-                )
+                logger.info("Auto-approving trusted CIMD client: %s", txn["client_id"])
                 upstream_url = self._build_upstream_authorize_url(txn_id, txn)
                 return RedirectResponse(url=upstream_url, status_code=302)
 
@@ -2262,7 +2260,7 @@ class OAuthProxy(OAuthProvider):
         # Load client to get client_name if available
         client = await self.get_client(txn["client_id"])
         client_name = getattr(client, "client_name", None) if client else None
-        
+
         # Check if this is a CIMD client and extract domain
         is_cimd_client = self._cimd_fetcher.is_cimd_client_id(txn["client_id"])
         cimd_domain = None

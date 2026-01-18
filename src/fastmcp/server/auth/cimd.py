@@ -140,7 +140,9 @@ class CIMDDocument(BaseModel):
     def validate_contacts(cls, v: list[str] | None) -> list[str] | None:
         """Validate that contacts are valid email addresses."""
         if v is not None:
-            email_pattern = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+            email_pattern = re.compile(
+                r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+            )
             for contact in v:
                 if not email_pattern.match(contact):
                     raise ValueError(f"Invalid email address in contacts: {contact}")

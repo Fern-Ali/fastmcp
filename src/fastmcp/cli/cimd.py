@@ -87,9 +87,13 @@ def create(
     """
     # Validate that at least one redirect URI is provided
     if not redirect_uri:
-        console.print("[bold red]Error:[/bold red] At least one --redirect-uri is required")
+        console.print(
+            "[bold red]Error:[/bold red] At least one --redirect-uri is required"
+        )
         console.print("\nExample:")
-        console.print("  fastmcp cimd create --redirect-uri https://app.example.com/callback")
+        console.print(
+            "  fastmcp cimd create --redirect-uri https://app.example.com/callback"
+        )
         sys.exit(1)
 
     try:
@@ -112,9 +116,15 @@ def create(
             output_path.write_text(json_str)
             console.print(f"[bold green]✓[/bold green] CIMD document created: {output}")
             console.print("\n[bold]Next steps:[/bold]")
-            console.print(f"1. Host this file at an HTTPS URL (e.g., https://example.com/cimd.json)")
-            console.print(f"2. Use that URL as your client_id when connecting to MCP servers")
-            console.print(f"\n[dim]The URL becomes your client_id - no registration needed![/dim]")
+            console.print(
+                "1. Host this file at an HTTPS URL (e.g., https://example.com/cimd.json)"
+            )
+            console.print(
+                "2. Use that URL as your client_id when connecting to MCP servers"
+            )
+            console.print(
+                "\n[dim]The URL becomes your client_id - no registration needed![/dim]"
+            )
         else:
             # Print to stdout with syntax highlighting
             syntax = Syntax(json_str, "json", theme="monokai", line_numbers=False)
@@ -173,39 +183,45 @@ def validate(
 
         if verbose:
             console.print("\n[bold]Document details:[/bold]")
-            
+
             if doc.client_name:
                 console.print(f"  Client name: {doc.client_name}")
-            
+
             console.print(f"  Redirect URIs ({len(doc.redirect_uris)}):")
             for uri in doc.redirect_uris:
                 console.print(f"    • {uri}")
-            
+
             if doc.client_uri:
                 console.print(f"  Homepage: {doc.client_uri}")
-            
+
             if doc.logo_uri:
                 console.print(f"  Logo: {doc.logo_uri}")
-            
+
             if doc.scope:
                 console.print(f"  Scopes: {doc.scope}")
-            
+
             if doc.grant_types:
                 console.print(f"  Grant types: {', '.join(doc.grant_types)}")
-            
+
             if doc.contacts:
                 console.print(f"  Contacts: {', '.join(doc.contacts)}")
 
         console.print("\n[bold]Next steps:[/bold]")
-        console.print("1. Host this file at an HTTPS URL (e.g., https://example.com/cimd.json)")
-        console.print("2. Use that URL as your client_id when connecting to MCP servers")
-        console.print("\n[dim]The file should be served with Content-Type: application/json[/dim]")
+        console.print(
+            "1. Host this file at an HTTPS URL (e.g., https://example.com/cimd.json)"
+        )
+        console.print(
+            "2. Use that URL as your client_id when connecting to MCP servers"
+        )
+        console.print(
+            "\n[dim]The file should be served with Content-Type: application/json[/dim]"
+        )
 
     except json.JSONDecodeError as e:
         console.print(f"[bold red]Error:[/bold red] Invalid JSON: {e}")
         sys.exit(1)
     except ValidationError as e:
-        console.print(f"[bold red]Error:[/bold red] Invalid CIMD document")
+        console.print("[bold red]Error:[/bold red] Invalid CIMD document")
         console.print("\n[bold]Validation errors:[/bold]")
         for error in e.errors():
             field = " -> ".join(str(x) for x in error["loc"])
