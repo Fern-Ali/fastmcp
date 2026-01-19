@@ -134,7 +134,7 @@
                   "servers/tasks",
                   "servers/telemetry",
                   "servers/versioning",
-                  "servers/visibility"
+                  "servers/enabled"
                 ]
               },
               {
@@ -354,7 +354,18 @@
                   },
                   "python-sdk/fastmcp-client-tasks",
                   "python-sdk/fastmcp-client-telemetry",
-                  "python-sdk/fastmcp-client-transports"
+                  {
+                    "group": "transports",
+                    "pages": [
+                      "python-sdk/fastmcp-client-transports-__init__",
+                      "python-sdk/fastmcp-client-transports-base",
+                      "python-sdk/fastmcp-client-transports-config",
+                      "python-sdk/fastmcp-client-transports-http",
+                      "python-sdk/fastmcp-client-transports-inference",
+                      "python-sdk/fastmcp-client-transports-memory",
+                      "python-sdk/fastmcp-client-transports-stdio"
+                    ]
+                  }
                 ]
               },
               {
@@ -463,7 +474,8 @@
                           "python-sdk/fastmcp-server-providers-openapi-routing"
                         ]
                       },
-                      "python-sdk/fastmcp-server-providers-proxy"
+                      "python-sdk/fastmcp-server-providers-proxy",
+                      "python-sdk/fastmcp-server-providers-wrapped_provider"
                     ]
                   },
                   "python-sdk/fastmcp-server-proxy",
@@ -494,10 +506,10 @@
                     "group": "transforms",
                     "pages": [
                       "python-sdk/fastmcp-server-transforms-__init__",
+                      "python-sdk/fastmcp-server-transforms-enabled",
                       "python-sdk/fastmcp-server-transforms-namespace",
                       "python-sdk/fastmcp-server-transforms-tool_transform",
-                      "python-sdk/fastmcp-server-transforms-version_filter",
-                      "python-sdk/fastmcp-server-transforms-visibility"
+                      "python-sdk/fastmcp-server-transforms-version_filter"
                     ]
                   }
                 ]
@@ -568,6 +580,7 @@
                       "python-sdk/fastmcp-utilities-openapi-schemas"
                     ]
                   },
+                  "python-sdk/fastmcp-utilities-pagination",
                   "python-sdk/fastmcp-utilities-tests",
                   "python-sdk/fastmcp-utilities-types",
                   "python-sdk/fastmcp-utilities-ui",

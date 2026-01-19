@@ -4,13 +4,12 @@ import json
 import logging
 import weakref
 from collections.abc import Callable, Generator, Mapping, Sequence
-from contextlib import AsyncExitStack, contextmanager
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from logging import Logger
 from typing import Any, Literal, cast, overload
 
-import anyio
 import mcp.types
 from mcp import LoggingLevel, ServerSession
 from mcp.server.lowlevel.server import request_ctx
@@ -55,9 +54,12 @@ from fastmcp.server.sampling.run import (
     execute_tools as run_sampling_tools,
 )
 from fastmcp.server.server import FastMCP, StateValue
+from fastmcp.server.transforms.enabled import Enabled
+from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import _clamp_logger, get_logger
 from fastmcp.utilities.types import get_cached_typeadapter
+from fastmcp.utilities.versions import VersionSpec
 
 logger: Logger = get_logger(name=__name__)
 to_client_logger: Logger = logger.getChild(suffix="to_client")
@@ -184,9 +186,6 @@ class Context:
         self._fastmcp: weakref.ref[FastMCP] = weakref.ref(fastmcp)
         self._session: ServerSession | None = session  # For state ops during init
         self._tokens: list[Token] = []
-        self._notification_queue: list[mcp.types.ServerNotificationType] = []
-        self._exit_stack: AsyncExitStack | None = None
-        self._cancel_scope: anyio.CancelScope | None = None
 
     @property
     def fastmcp(self) -> FastMCP:
@@ -221,24 +220,10 @@ class Context:
         if server._worker is not None:
             self._worker_token = _current_worker.set(server._worker)
 
-        # Start background notification flusher
-        self._exit_stack = AsyncExitStack()
-        await self._exit_stack.__aenter__()
-        tg = await self._exit_stack.enter_async_context(anyio.create_task_group())
-        self._cancel_scope = anyio.CancelScope()
-        tg.start_soon(self._periodic_flush)
-
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Exit the context manager and reset the most recent token."""
-        # Stop background flusher and do final flush
-        if self._cancel_scope is not None:
-            self._cancel_scope.cancel()
-        await self._flush_notifications()
-        if self._exit_stack is not None:
-            await self._exit_stack.aclose()
-
         # Reset server/docket/worker tokens
         from fastmcp.server.dependencies import (
             _current_docket,
@@ -621,27 +606,10 @@ class Context:
     ) -> None:
         """Send a notification to the client immediately.
 
-        Use this in async code when you want the notification sent right away.
-        For sync code, use send_notification_sync() which queues the notification
-        for the background flusher.
-
         Args:
             notification: An MCP notification instance (e.g., ToolListChangedNotification())
         """
         await self.session.send_notification(mcp.types.ServerNotification(notification))
-
-    def send_notification_sync(
-        self, notification: mcp.types.ServerNotificationType
-    ) -> None:
-        """Queue a notification to be sent by the background flusher.
-
-        Use this in sync code when you can't await. The notification will be
-        sent within ~1 second by the background flusher.
-
-        Args:
-            notification: An MCP notification instance (e.g., ToolListChangedNotification())
-        """
-        self._notification_queue.append(notification)
 
     async def close_sse_stream(self) -> None:
         """Close the current response stream to trigger client reconnection.
@@ -1176,27 +1144,193 @@ class Context:
         prefixed_key = self._make_state_key(key)
         await self.fastmcp._state_store.delete(key=prefixed_key)
 
-    async def _periodic_flush(self) -> None:
-        """Background task that flushes the notification queue every second."""
-        with self._cancel_scope:  # type: ignore[union-attr]
-            while True:
-                await anyio.sleep(1)
-                await self._flush_notifications()
+    # -------------------------------------------------------------------------
+    # Session visibility control
+    # -------------------------------------------------------------------------
 
-    async def _flush_notifications(self) -> None:
-        """Send all queued notifications."""
-        if not self._notification_queue:
-            return
+    async def _get_visibility_rules(self) -> list[dict[str, Any]]:
+        """Load visibility rule dicts from session state."""
+        return await self.get_state("_visibility_rules") or []
 
-        for notification in self._notification_queue:
-            try:
-                await self.send_notification(notification)
-            except Exception:
-                # Don't let notification failures break the request
-                logger.debug(
-                    f"Failed to send notification: {notification}", exc_info=True
+    async def _save_visibility_rules(
+        self,
+        rules: list[dict[str, Any]],
+        *,
+        components: set[Literal["tool", "resource", "template", "prompt"]]
+        | None = None,
+    ) -> None:
+        """Save visibility rule dicts to session state and send notifications.
+
+        Args:
+            rules: The visibility rules to save.
+            components: Optional hint about which component types are affected.
+                If None, sends notifications for all types (safe default).
+                If provided, only sends notifications for specified types.
+        """
+        await self.set_state("_visibility_rules", rules)
+
+        # Send notifications based on components hint
+        # Note: MCP has no separate template notification - templates use ResourceListChangedNotification
+        if components is None or "tool" in components:
+            await self.send_notification(mcp.types.ToolListChangedNotification())
+        if components is None or "resource" in components or "template" in components:
+            await self.send_notification(mcp.types.ResourceListChangedNotification())
+        if components is None or "prompt" in components:
+            await self.send_notification(mcp.types.PromptListChangedNotification())
+
+    def _create_enabled_transforms(self, rules: list[dict[str, Any]]) -> list[Enabled]:
+        """Convert rule dicts to Enabled transforms."""
+        transforms = []
+        for params in rules:
+            version = None
+            if params.get("version"):
+                version_dict = params["version"]
+                version = VersionSpec(
+                    gte=version_dict.get("gte"),
+                    lt=version_dict.get("lt"),
+                    eq=version_dict.get("eq"),
                 )
-        self._notification_queue.clear()
+            transforms.append(
+                Enabled(
+                    params["enabled"],
+                    names=set(params["names"]) if params.get("names") else None,
+                    keys=set(params["keys"]) if params.get("keys") else None,
+                    version=version,
+                    tags=set(params["tags"]) if params.get("tags") else None,
+                    components=(
+                        set(params["components"]) if params.get("components") else None
+                    ),
+                    match_all=params.get("match_all", False),
+                )
+            )
+        return transforms
+
+    async def _get_session_transforms(self) -> list[Enabled]:
+        """Get session-specific Enabled transforms from state store."""
+        try:
+            # Will raise RuntimeError if no session available
+            _ = self.session_id
+        except RuntimeError:
+            return []
+
+        rules = await self._get_visibility_rules()
+        return self._create_enabled_transforms(rules)
+
+    async def enable_components(
+        self,
+        *,
+        names: set[str] | None = None,
+        keys: set[str] | None = None,
+        version: VersionSpec | None = None,
+        tags: set[str] | None = None,
+        components: set[Literal["tool", "resource", "template", "prompt"]]
+        | None = None,
+        match_all: bool = False,
+    ) -> None:
+        """Enable components matching criteria for this session only.
+
+        Session rules override global transforms. Rules accumulate - each call
+        adds a new rule to the session. Later marks override earlier ones
+        (Enabled transform semantics).
+
+        Sends notifications to this session only: ToolListChangedNotification,
+        ResourceListChangedNotification, and PromptListChangedNotification.
+
+        Args:
+            names: Component names or URIs to match.
+            keys: Component keys to match (e.g., {"tool:my_tool@v1"}).
+            version: Component version spec to match.
+            tags: Tags to match (component must have at least one).
+            components: Component types to match (e.g., {"tool", "prompt"}).
+            match_all: If True, matches all components regardless of other criteria.
+        """
+        # Normalize empty sets to None (empty = match all)
+        components = components if components else None
+
+        # Load current rules
+        rules = await self._get_visibility_rules()
+
+        # Create new rule dict
+        rule: dict[str, Any] = {
+            "enabled": True,
+            "names": list(names) if names else None,
+            "keys": list(keys) if keys else None,
+            "version": (
+                {"gte": version.gte, "lt": version.lt, "eq": version.eq}
+                if version
+                else None
+            ),
+            "tags": list(tags) if tags else None,
+            "components": list(components) if components else None,
+            "match_all": match_all,
+        }
+
+        # Add and save (notifications sent by _save_visibility_rules)
+        rules.append(rule)
+        await self._save_visibility_rules(rules, components=components)
+
+    async def disable_components(
+        self,
+        *,
+        names: set[str] | None = None,
+        keys: set[str] | None = None,
+        version: VersionSpec | None = None,
+        tags: set[str] | None = None,
+        components: set[Literal["tool", "resource", "template", "prompt"]]
+        | None = None,
+        match_all: bool = False,
+    ) -> None:
+        """Disable components matching criteria for this session only.
+
+        Session rules override global transforms. Rules accumulate - each call
+        adds a new rule to the session. Later marks override earlier ones
+        (Enabled transform semantics).
+
+        Sends notifications to this session only: ToolListChangedNotification,
+        ResourceListChangedNotification, and PromptListChangedNotification.
+
+        Args:
+            names: Component names or URIs to match.
+            keys: Component keys to match (e.g., {"tool:my_tool@v1"}).
+            version: Component version spec to match.
+            tags: Tags to match (component must have at least one).
+            components: Component types to match (e.g., {"tool", "prompt"}).
+            match_all: If True, matches all components regardless of other criteria.
+        """
+        # Normalize empty sets to None (empty = match all)
+        components = components if components else None
+
+        # Load current rules
+        rules = await self._get_visibility_rules()
+
+        # Create new rule dict
+        rule: dict[str, Any] = {
+            "enabled": False,
+            "names": list(names) if names else None,
+            "keys": list(keys) if keys else None,
+            "version": (
+                {"gte": version.gte, "lt": version.lt, "eq": version.eq}
+                if version
+                else None
+            ),
+            "tags": list(tags) if tags else None,
+            "components": list(components) if components else None,
+            "match_all": match_all,
+        }
+
+        # Add and save (notifications sent by _save_visibility_rules)
+        rules.append(rule)
+        await self._save_visibility_rules(rules, components=components)
+
+    async def reset_components(self) -> None:
+        """Clear all session visibility rules.
+
+        Use this to reset session visibility back to global defaults.
+
+        Sends notifications to this session only: ToolListChangedNotification,
+        ResourceListChangedNotification, and PromptListChangedNotification.
+        """
+        await self._save_visibility_rules([])
 
 
 async def _log_to_server_and_client(
@@ -1326,3 +1460,36 @@ def _extract_tool_calls(
     elif isinstance(content, ToolUseContent):
         return [content]
     return []
+
+
+ComponentT = TypeVar("ComponentT", bound="FastMCPComponent")
+
+
+async def apply_session_transforms(
+    components: Sequence[ComponentT],
+) -> Sequence[ComponentT]:
+    """Apply session-specific visibility transforms to components.
+
+    This helper applies session-level enable/disable rules by marking
+    components with their enabled state. Session transforms override
+    global transforms due to mark-based semantics (later marks win).
+
+    Args:
+        components: The components to apply session transforms to.
+
+    Returns:
+        The components with session transforms applied.
+    """
+    current_ctx = _current_context.get()
+    if current_ctx is None:
+        return components
+
+    session_transforms = await current_ctx._get_session_transforms()
+    if not session_transforms:
+        return components
+
+    # Apply each transform's marking to each component
+    result = list(components)
+    for transform in session_transforms:
+        result = [transform._mark_component(c) for c in result]
+    return result
